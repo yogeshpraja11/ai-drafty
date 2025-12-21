@@ -1,0 +1,148 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Roboto:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Draftly Design System - Gmail-Inspired AI Email Agent */
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 220 9% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 9% 20%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 9% 20%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 20%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 220 9% 20%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.5rem;
+
+    /* Draftly Status Colors */
+    --status-pending: 45 93% 47%;
+    --status-pending-foreground: 0 0% 100%;
+    --status-generated: 217 91% 60%;
+    --status-generated-foreground: 0 0% 100%;
+    --status-edited: 271 81% 56%;
+    --status-edited-foreground: 0 0% 100%;
+    --status-sent: 142 71% 45%;
+    --status-sent-foreground: 0 0% 100%;
+    --status-rejected: 0 84% 60%;
+    --status-rejected-foreground: 0 0% 100%;
+
+    /* Draftly Specific */
+    --draftly-ai: 271 81% 56%;
+    --draftly-ai-foreground: 0 0% 100%;
+
+    /* Sidebar */
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 220 9% 46%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 220 9% 20%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217 91% 60%;
+  }
+
+  .dark {
+    --background: 220 13% 10%;
+    --foreground: 220 14% 96%;
+
+    --card: 220 13% 13%;
+    --card-foreground: 220 14% 96%;
+
+    --popover: 220 13% 13%;
+    --popover-foreground: 220 14% 96%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 220 13% 18%;
+    --secondary-foreground: 220 14% 96%;
+
+    --muted: 220 13% 18%;
+    --muted-foreground: 220 9% 60%;
+
+    --accent: 220 13% 18%;
+    --accent-foreground: 220 14% 96%;
+
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 20%;
+    --input: 220 13% 20%;
+    --ring: 217 91% 60%;
+
+    /* Draftly Status Colors - Dark */
+    --status-pending: 45 93% 47%;
+    --status-pending-foreground: 0 0% 10%;
+    --status-generated: 217 91% 60%;
+    --status-generated-foreground: 0 0% 100%;
+    --status-edited: 271 81% 56%;
+    --status-edited-foreground: 0 0% 100%;
+    --status-sent: 142 71% 45%;
+    --status-sent-foreground: 0 0% 100%;
+    --status-rejected: 0 72% 55%;
+    --status-rejected-foreground: 0 0% 100%;
+
+    /* Draftly Specific - Dark */
+    --draftly-ai: 271 81% 60%;
+    --draftly-ai-foreground: 0 0% 100%;
+
+    /* Sidebar - Dark */
+    --sidebar-background: 220 13% 8%;
+    --sidebar-foreground: 220 9% 70%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 13% 15%;
+    --sidebar-accent-foreground: 220 14% 96%;
+    --sidebar-border: 220 13% 18%;
+    --sidebar-ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Roboto', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Google Sans', 'Roboto', sans-serif;
+  }
+}
+
+@layer utilities {
+  .gmail-shadow {
+    box-shadow: 0 1px 2px 0 rgba(60, 64, 67, 0.3), 0 2px 6px 2px rgba(60, 64, 67, 0.15);
+  }
+  
+  .gmail-shadow-hover {
+    box-shadow: 0 1px 3px 0 rgba(60, 64, 67, 0.3), 0 4px 8px 3px rgba(60, 64, 67, 0.15);
+  }
+}
