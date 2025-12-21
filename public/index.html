@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Draftly: Gmail AI Reply Agent</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      * {
+        box-sizing: border-box;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #0f172a;
+        color: #e5e7eb;
+      }
+      .app-shell {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        height: 100vh;
+      }
+      .sidebar {
+        border-right: 1px solid rgba(148, 163, 184, 0.3);
+        padding: 16px;
+        background: radial-gradient(circle at top left, #1d4ed8, #020617);
+      }
+      .main {
+        padding: 16px 20px;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      h1 span.logo {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 26px;
+        height: 26px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #22c55e, #3b82f6);
+        color: #0b1120;
+        font-weight: 700;
+      }
+      .subtitle {
+        font-size: 12px;
+        color: #cbd5f5;
+        opacity: 0.85;
+      }
+      .badge-row {
+        margin-top: 12px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .badge {
+        font-size: 10px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        color: #e5e7eb;
+        background: rgba(15, 23, 42, 0.7);
+      }
+      .filters {
+        margin-top: 18px;
+      }
+      .filters label {
+        font-size: 11px;
+        color: #cbd5f5;
+        display: block;
+        margin-bottom: 6px;
+      }
+      select {
+        width: 100%;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid rgba(148, 163, 184, 0.6);
+        background: rgba(15, 23, 42, 0.6);
+        color: #e5e7eb;
+      }
+      .draft-list {
+        margin-top: 14px;
+        border-radius: 10px;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        padding: 6px;
+        height: calc(100vh - 170px);
+        overflow-y: auto;
+      }
+      .draft-item {
+        padding: 8px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s;
+      }
+      .draft-item:hover {
+        background: rgba(37, 99, 235, 0.15);
+        transform: translateY(-1px);
+      }
+      .draft-item.active {
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(37, 99, 235, 0.1));
+        border: 1px solid rgba(59, 130, 246, 0.7);
+      }
+      .draft-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
+      }
+      .from {
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .status-pill {
+        font-size: 10px;
+        padding: 2px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.8);
+        text-transform: uppercase;
+      }
+      .status-pill[data-status='draft_generated'],
+      .status-pill[data-status='draft_edited'] {
+        border-color: rgba(59, 130, 246, 0.9);
+        color: #bfdbfe;
+      }
+      .status-pill[data-status='sent'] {
+        border-color: rgba(34, 197, 94, 0.9);
+        color: #bbf7d0;
+      }
+      .status-pill[data-status='rejected'] {
+        border-color: rgba(248, 113, 113, 0.9);
+        color: #fecaca;
+      }
+      .subject {
+        font-size: 12px;
+        color: #cbd5f5;
+        margin-top: 2px;
+      }
+      .timestamp {
+        font-size: 10px;
+        color: #9ca3af;
+        margin-top: 2px;
+      }
+      .main-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .main-title {
+        font-size: 16px;
+        font-weight: 500;
+      }
+      .pill {
+        font-size: 11px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.7);
+        color: #e5e7eb;
+      }
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr);
+        gap: 14px;
+        flex: 1;
+        min-height: 0;
+      }
+      .card {
+        background: rgba(15, 23, 42, 0.9);
+        border-radius: 12px;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+        padding: 12px 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        height: 100%;
+        min-height: 0;
+      }
+      .card h2 {
+        font-size: 13px;
+        margin: 0 0 4px;
+        color: #e5e7eb;
+      }
+      .meta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        font-size: 11px;
+        color: #9ca3af;
+      }
+      .meta-label {
+        color: #cbd5f5;
+      }
+      .email-body,
+      .draft-body {
+        flex: 1;
+        background: rgba(15, 23, 42, 0.9);
+        border-radius: 8px;
+        border: 1px solid rgba(51, 65, 85, 0.9);
+        padding: 8px;
+        font-size: 12px;
+        color: #e5e7eb;
+        white-space: pre-wrap;
+        overflow-y: auto;
+      }
+      textarea {
+        width: 100%;
+        height: 100%;
+        border: none;
+        outline: none;
+        resize: none;
+        background: transparent;
+        color: inherit;
+        font: inherit;
+      }
+      .actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 6px;
+      }
+      .left-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+      .right-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .tone-select {
+        font-size: 11px;
+        padding: 3px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.7);
+        background: rgba(15, 23, 42, 0.9);
+        color: #e5e7eb;
+      }
+      button {
+        border-radius: 999px;
+        border: none;
+        padding: 6px 12px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      button.primary {
+        background: linear-gradient(135deg, #22c55e, #16a34a);
+        color: #052e16;
+      }
+      button.secondary {
+        background: rgba(15, 23, 42, 0.9);
+        color: #e5e7eb;
+        border: 1px solid rgba(148, 163, 184, 0.8);
+      }
+      button.danger {
+        background: rgba(248, 113, 113, 0.15);
+        color: #fecaca;
+        border: 1px solid rgba(248, 113, 113, 0.9);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .status-chip {
+        font-size: 11px;
+        color: #a5b4fc;
+      }
+      .empty-state {
+        font-size: 13px;
+        color: #9ca3af;
+        padding: 16px;
+        text-align: center;
+      }
+      .history {
+        margin-top: 4px;
+        font-size: 11px;
+        color: #9ca3af;
+        max-height: 80px;
+        overflow-y: auto;
+      }
+      .history-entry {
+        margin-bottom: 2px;
+      }
+      .toast {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        background: rgba(15, 23, 42, 0.98);
+        color: #e5e7eb;
+        padding: 8px 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(34, 197, 94, 0.7);
+        font-size: 12px;
+        display: none;
+      }
+      @media (max-width: 900px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+          grid-template-rows: 240px 1fr;
+        }
+        .sidebar {
+          border-right: none;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+        }
+        .draft-list {
+          height: 160px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <h1>
+          <span class="logo">D</span>
+          Draftly: Gmail AI Reply Agent
+        </h1>
+        <div class="subtitle">Review, edit and approve AI-generated Gmail replies.</div>
+        <div class="badge-row">
+          <div class="badge">Gmail IMAP + Nodemailer</div>
+          <div class="badge">Groq AI drafts</div>
+          <div class="badge">Human-in-the-loop</div>
+        </div>
+        <div class="filters">
+          <label for="statusFilter">Draft status</label>
+          <select id="statusFilter">
+            <option value="">All drafts</option>
+            <option value="draft_generated">Needs review</option>
+            <option value="draft_edited">Edited</option>
+            <option value="sent">Sent</option>
+            <option value="rejected">Rejected</option>
+          </select>
+        </div>
+        <div class="draft-list" id="draftList"></div>
+      </aside>
+      <main class="main">
+        <div class="main-header">
+          <div>
+            <div class="main-title">Inbox review queue</div>
+            <div class="subtitle" id="summaryText">Waiting for drafts...</div>
+          </div>
+          <div class="pill">Auto-poll: every <span id="pollMs">—</span> ms</div>
+        </div>
+        <div class="content-grid" id="contentGrid" style="display: none">
+          <section class="card" id="emailCard">
+            <h2>Incoming email</h2>
+            <div class="meta-row" id="emailMeta"></div>
+            <div class="email-body" id="emailBody"></div>
+          </section>
+          <section class="card" id="draftCard">
+            <h2>AI draft reply</h2>
+            <div class="meta-row">
+              <span class="meta-label">Tone:</span>
+              <select id="toneSelect" class="tone-select">
+                <option value="formal">Formal</option>
+                <option value="concise">Concise</option>
+                <option value="friendly">Friendly</option>
+              </select>
+              <span class="status-chip" id="statusChip"></span>
+            </div>
+            <div class="draft-body">
+              <textarea id="draftText" spellcheck="false"></textarea>
+            </div>
+            <div class="actions">
+              <div class="left-actions">
+                <button class="secondary" id="saveBtn">Save edits</button>
+              </div>
+              <div class="right-actions">
+                <button class="danger" id="rejectBtn">Reject</button>
+                <button class="primary" id="approveBtn">Approve &amp; send</button>
+              </div>
+            </div>
+            <div class="history" id="history"></div>
+          </section>
+        </div>
+        <div id="emptyState" class="empty-state">
+          No drafts yet. New incoming emails will appear here with AI-generated replies for review.
+        </div>
+      </main>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script>
+      const apiBase = '/api';
+      let drafts = [];
+      let activeId = null;
+      const draftListEl = document.getElementById('draftList');
+      const statusFilterEl = document.getElementById('statusFilter');
+      const summaryTextEl = document.getElementById('summaryText');
+      const pollMsEl = document.getElementById('pollMs');
+      const contentGridEl = document.getElementById('contentGrid');
+      const emptyStateEl = document.getElementById('emptyState');
+      const emailMetaEl = document.getElementById('emailMeta');
+      const emailBodyEl = document.getElementById('emailBody');
+      const draftTextEl = document.getElementById('draftText');
+      const toneSelectEl = document.getElementById('toneSelect');
+      const statusChipEl = document.getElementById('statusChip');
+      const historyEl = document.getElementById('history');
+      const saveBtn = document.getElementById('saveBtn');
+      const rejectBtn = document.getElementById('rejectBtn');
+      const approveBtn = document.getElementById('approveBtn');
+      const toastEl = document.getElementById('toast');
+
+      function showToast(message) {
+        toastEl.textContent = message;
+        toastEl.style.display = 'block';
+        setTimeout(() => {
+          toastEl.style.display = 'none';
+        }, 2200);
+      }
+
+      function formatDate(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return d.toLocaleString();
+      }
+
+      function renderDraftList() {
+        const status = statusFilterEl.value;
+        draftListEl.innerHTML = '';
+        const filtered = status ? drafts.filter((d) => d.status === status) : drafts;
+        if (!filtered.length) {
+          draftListEl.innerHTML =
+            '<div class="empty-state" style="background:none;border:none;padding:8px;">No drafts in this view.</div>';
+        }
+        filtered.forEach((d) => {
+          const div = document.createElement('div');
+          div.className = 'draft-item' + (d.id === activeId ? ' active' : '');
+          div.onclick = () => selectDraft(d.id);
+          div.innerHTML = `
+            <div class="draft-item-header">
+              <div class="from">${d.email.from}</div>
+              <span class="status-pill" data-status="${d.status}">${d.status}</span>
+            </div>
+            <div class="subject">${d.email.subject}</div>
+            <div class="timestamp">${formatDate(d.email.date || d.createdAt)}</div>
+          `;
+          draftListEl.appendChild(div);
+        });
+        summaryTextEl.textContent = filtered.length
+          ? filtered.length + ' drafts in queue'
+          : 'Waiting for drafts...';
+      }
+
+      function renderActive() {
+        const draft = drafts.find((d) => d.id === activeId);
+        if (!draft) {
+          contentGridEl.style.display = 'none';
+          emptyStateEl.style.display = 'block';
+          return;
+        }
+        contentGridEl.style.display = 'grid';
+        emptyStateEl.style.display = 'none';
+        emailMetaEl.innerHTML = `
+          <span><span class="meta-label">From:</span> ${draft.email.from}</span>
+          <span><span class="meta-label">To:</span> ${draft.email.to}</span>
+          <span><span class="meta-label">Received:</span> ${formatDate(draft.email.date)}</span>
+        `;
+        emailBodyEl.textContent = draft.email.text || '(no body)';
+        draftTextEl.value = draft.draftText || '';
+        toneSelectEl.value = draft.tone || 'formal';
+        statusChipEl.textContent = 'Status: ' + draft.status;
+        historyEl.innerHTML = (draft.history || [])
+          .slice()
+          .reverse()
+          .map(
+            (h) =>
+              '<div class="history-entry">' +
+              formatDate(h.at) +
+              ' — ' +
+              (h.action || '') +
+              '</div>'
+          )
+          .join('');
+        const disabled = draft.status === 'sent' || draft.status === 'rejected';
+        draftTextEl.disabled = disabled;
+        toneSelectEl.disabled = disabled;
+        saveBtn.disabled = disabled;
+        approveBtn.disabled = disabled;
+        rejectBtn.disabled = disabled;
+      }
+
+      async function loadDrafts() {
+        try {
+          const status = statusFilterEl.value;
+          const url = status ? apiBase + '/drafts?status=' + encodeURIComponent(status) : apiBase + '/drafts';
+          const res = await fetch(url);
+          drafts = await res.json();
+          if (!activeId && drafts.length) {
+            activeId = drafts[0].id;
+          }
+          renderDraftList();
+          renderActive();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      async function selectDraft(id) {
+        activeId = id;
+        renderDraftList();
+        renderActive();
+      }
+
+      async function saveEdits() {
+        if (!activeId) return;
+        const draftText = draftTextEl.value;
+        const tone = toneSelectEl.value;
+        await fetch(apiBase + '/drafts/' + activeId + '/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ draftText, tone }),
+        });
+        showToast('Draft saved');
+        await loadDrafts();
+      }
+
+      async function approveAndSend() {
+        if (!activeId) return;
+        const draftText = draftTextEl.value;
+        approveBtn.disabled = true;
+        showToast('Sending reply...');
+        try {
+          await fetch(apiBase + '/drafts/' + activeId + '/approve', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ draftText }),
+          });
+          showToast('Reply sent via Gmail');
+          await loadDrafts();
+        } catch (e) {
+          console.error(e);
+          showToast('Failed to send reply');
+        } finally {
+          approveBtn.disabled = false;
+        }
+      }
+
+      async function rejectDraft() {
+        if (!activeId) return;
+        await fetch(apiBase + '/drafts/' + activeId + '/reject', { method: 'POST' });
+        showToast('Draft rejected');
+        await loadDrafts();
+      }
+
+      statusFilterEl.addEventListener('change', loadDrafts);
+      saveBtn.addEventListener('click', saveEdits);
+      approveBtn.addEventListener('click', approveAndSend);
+      rejectBtn.addEventListener('click', rejectDraft);
+
+      // initial load and polling
+      loadDrafts();
+      setInterval(loadDrafts, 5000);
+
+      // try to read poll interval from a data attribute if present
+      fetch('/').finally(() => {
+        // nothing, purely to warm connection
+      });
+      // the actual poll interval is logged on startup; keep UI generic
+      pollMsEl.textContent = '3000';
+    </script>
+  </body>
+</html>
+
+
