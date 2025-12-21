@@ -41,8 +41,8 @@ src/
 ├── server.ts       # Express API server
 └── index.ts        # Application entry point
 
-public/
-└── index.html      # Minimal frontend for draft review
+src/frontend/
+└──            frontend for draft review
 ```
 
 ## Core Components
