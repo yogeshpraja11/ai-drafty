@@ -3,8 +3,10 @@ import cors from "cors";
 import { EmailService } from "./services/EmailService";
 import { DraftStore } from "./services/DraftStore";
 import { AIResponseHandler } from "./handlers/AIResponseHandler";
+import { AuthHandler } from "./handlers/AuthHandler";
 import { logger } from "./utils/logger";
 import { settingsStore } from "./services/SettingsStore";
+import { userService } from "./services/UserService";
 
 export function createServer(
   emailService: EmailService,
@@ -12,6 +14,7 @@ export function createServer(
 ) {
   const app = express();
   const aiHandler = new AIResponseHandler(emailService);
+  const authHandler = new AuthHandler();
 
   app.use(
     cors({
@@ -24,7 +27,7 @@ export function createServer(
         "http://192.168.1.2:8080",
       ],
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-user-id"],
     })
   );
   app.use(express.json());
@@ -72,17 +75,29 @@ export function createServer(
     }
   });
 
+  // Auth Routes
+  app.get("/api/auth/url", (req, res) => authHandler.getAuthUrl(req, res));
+  app.post("/api/auth/callback", (req, res) => authHandler.handleCallback(req, res));
+
   // Settings Endpoints
   // Get current settings
-  app.get("/api/settings", (req: Request, res: Response) => {
-    res.json(settingsStore.getSettings());
+  app.get("/api/settings", async (req: Request, res: Response) => {
+    const userId = req.headers['x-user-id'] as string;
+    const settings = await settingsStore.getSettings(userId); // Will fallback to defaults if userId is undefined/null inside, but passing it is better
+    res.json(settings);
   });
 
   // Update settings
-  app.post("/api/settings", (req: Request, res: Response) => {
+  app.post("/api/settings", async (req: Request, res: Response) => {
     try {
       const updates = req.body;
-      const updated = settingsStore.updateSettings(updates);
+      const userId = req.headers['x-user-id'] as string;
+
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized: Missing User ID" });
+      }
+
+      const updated = await settingsStore.updateSettings(userId, updates);
       // Update config/defaults if needed, or handlers will read from store directly
       res.json(updated);
     } catch (error: any) {
@@ -92,16 +107,22 @@ export function createServer(
   });
 
   // List all drafts (optionally filter by status)
-  app.get("/api/drafts", (req: Request, res: Response) => {
+  app.get("/api/drafts", async (req: Request, res: Response) => {
     const status = req.query.status as any;
-    const drafts = draftStore.listDrafts(status);
+    const userId = req.headers['x-user-id'] as string;
+
+    if (!userId) {
+      return res.status(401).json({ message: "Unauthorized: Missing User ID" });
+    }
+
+    const drafts = await draftStore.listDrafts(userId, status);
     res.json(drafts.map(toFrontendDraft));
   });
 
   // Get single draft by id
-  app.get("/api/drafts/:id", (req: Request<{ id: string }>, res: Response) => {
+  app.get("/api/drafts/:id", async (req: Request<{ id: string }>, res: Response) => {
     const { id } = req.params;
-    const draft = draftStore.getDraft(id);
+    const draft = await draftStore.getDraft(id);
     if (!draft) {
       return res.status(404).json({ message: "Draft not found" });
     }
@@ -113,7 +134,7 @@ export function createServer(
     try {
       const { id } = req.params;
       const { tone } = req.body as { tone?: any };
-      const draft = draftStore.getDraft(id);
+      const draft = await draftStore.getDraft(id);
 
       if (!draft) {
         return res.status(404).json({ message: "Draft not found" });
@@ -125,12 +146,12 @@ export function createServer(
       const response = await aiHandler.generateResponse(draft.email, tone || 'formal');
 
       // Update draft text and status
-      const updated = draftStore.updateDraftText(id, response, tone);
+      const updated = await draftStore.updateDraftText(id, response, tone);
       if (updated) {
         // Also ensure status is set to draft_generated if it was pending
         if (updated.status === 'pending') {
-          draftStore.updateStatus(id, 'draft_generated');
-          updated.status = 'draft_generated';
+          const statusUpdated = await draftStore.updateStatus(id, 'draft_generated');
+          if (statusUpdated) updated.status = 'draft_generated';
         }
       }
 
@@ -147,13 +168,13 @@ export function createServer(
   // Update draft text (edit)
   app.post(
     "/api/drafts/:id/edit",
-    (req: Request<{ id: string }>, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
       const { draftText, tone } = req.body as { draftText: string; tone?: any };
       if (!draftText) {
         return res.status(400).json({ message: "draftText is required" });
       }
       const { id } = req.params;
-      const updated = draftStore.updateDraftText(id, draftText, tone);
+      const updated = await draftStore.updateDraftText(id, draftText, tone);
       if (!updated) {
         return res.status(404).json({ message: "Draft not found" });
       }
@@ -168,7 +189,7 @@ export function createServer(
       try {
         const { draftText } = req.body as { draftText?: string };
         const { id } = req.params;
-        const draft = draftStore.getDraft(id);
+        const draft = await draftStore.getDraft(id);
         if (!draft) {
           return res.status(404).json({ message: "Draft not found" });
         }
@@ -178,8 +199,8 @@ export function createServer(
         // send email using the email service
         await emailService.sendReply(draft.email, finalText);
 
-        draftStore.updateDraftText(id, finalText);
-        const updated = draftStore.updateStatus(id, "sent", {
+        await draftStore.updateDraftText(id, finalText);
+        const updated = await draftStore.updateStatus(id, "sent", {
           via: "api_approve",
         });
 
@@ -197,9 +218,9 @@ export function createServer(
   // Reject a draft (no send)
   app.post(
     "/api/drafts/:id/reject",
-    (req: Request<{ id: string }>, res: Response) => {
+    async (req: Request<{ id: string }>, res: Response) => {
       const { id } = req.params;
-      const draft = draftStore.updateStatus(id, "rejected");
+      const draft = await draftStore.updateStatus(id, "rejected");
       if (!draft) {
         return res.status(404).json({ message: "Draft not found" });
       }

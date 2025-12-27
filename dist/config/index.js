@@ -14,7 +14,12 @@ exports.config = {
     },
     groq: {
         apiKey: process.env.GROQ_API_KEY,
-        model: process.env.GROQ_MODEL || 'mixtral-8x7b-32768'
+        model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile'
+    },
+    google: {
+        clientId: process.env.GOOGLE_CLIENT_ID,
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+        redirectUri: process.env.GOOGLE_REDIRECT_URI
     },
     app: {
         port: parseInt(process.env.PORT || '3000', 10),

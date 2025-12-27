@@ -41,8 +41,8 @@ src/
 ├── server.ts       # Express API server
 └── index.ts        # Application entry point
 
-public/
-└── index.html      # Minimal frontend for draft review
+src/frontend/
+└──            frontend for draft review
 ```
 
 ## Core Components
@@ -91,11 +91,12 @@ Manages interactions with the Groq API:
 The application uses environment variables for configuration:
 
 ```
-EMAIL_USER=your-email@gmail.com
-EMAIL_PASSWORD=your-app-password
 GROQ_API_KEY=your-groq-api-key
 EMAIL_POLL_INTERVAL=3000  # Optional, defaults to 3000ms
-GROQ_MODEL=mixtral-8x7b-32768  # Optional
+GROQ_MODEL=llama-3.3-70b-versatile  # Optional
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/api/auth/callback
 ```
 
 ## Setup and Installation

@@ -1,14 +1,11 @@
-import fs from 'fs';
-import path from 'path';
+import { getDb } from '../db/database';
 import { logger } from '../utils/logger';
+import { userService } from './UserService';
 
 export interface UserSettings {
     signature: string;
     defaultTone: string; // 'formal' | 'casual' etc.
-    // We can add more settings here later
 }
-
-const SETTINGS_FILE = path.join(process.cwd(), 'data', 'settings.json');
 
 const DEFAULT_SETTINGS: UserSettings = {
     signature: 'Sent from my AI Assistant',
@@ -16,44 +13,60 @@ const DEFAULT_SETTINGS: UserSettings = {
 };
 
 export class SettingsStore {
-    private settings: UserSettings;
 
-    constructor() {
-        this.settings = this.load();
-    }
+    async getSettings(userId?: string): Promise<UserSettings> {
+        const db = await getDb();
+        let row;
 
-    private load(): UserSettings {
-        try {
-            if (fs.existsSync(SETTINGS_FILE)) {
-                const raw = fs.readFileSync(SETTINGS_FILE, 'utf8');
-                return JSON.parse(raw);
+        if (userId) {
+            row = await db.get('SELECT * FROM settings WHERE user_id = ?', userId);
+        } else {
+            // Try to find the first user if not specified (for single-user mode)
+            const user = await userService.getFirstUser();
+            if (user) {
+                row = await db.get('SELECT * FROM settings WHERE user_id = ?', user.id);
             }
-        } catch (err) {
-            logger.error('Failed to load settings, using defaults', err);
         }
+
+        if (row) {
+            const prefs = row.preferences ? JSON.parse(row.preferences) : {};
+            return {
+                signature: row.signature || DEFAULT_SETTINGS.signature,
+                defaultTone: prefs.defaultTone || DEFAULT_SETTINGS.defaultTone
+            };
+        }
+
         return { ...DEFAULT_SETTINGS };
     }
 
-    private persist() {
-        try {
-            const dir = path.dirname(SETTINGS_FILE);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-            fs.writeFileSync(SETTINGS_FILE, JSON.stringify(this.settings, null, 2), 'utf8');
-        } catch (err) {
-            logger.error('Failed to save settings', err);
+    async updateSettings(userId: string, updates: Partial<UserSettings>): Promise<UserSettings> {
+        const db = await getDb();
+        const current = await this.getSettings(userId);
+        const newSettings = { ...current, ...updates };
+
+        const prefs = {
+            defaultTone: newSettings.defaultTone
+        };
+
+        const existing = await db.get('SELECT user_id FROM settings WHERE user_id = ?', userId);
+
+        if (existing) {
+            await db.run(
+                'UPDATE settings SET signature = ?, preferences = ? WHERE user_id = ?',
+                newSettings.signature,
+                JSON.stringify(prefs),
+                userId
+            );
+        } else {
+            await db.run(
+                'INSERT INTO settings (user_id, signature, preferences) VALUES (?, ?, ?)',
+                userId,
+                newSettings.signature,
+                JSON.stringify(prefs)
+            );
         }
-    }
 
-    public getSettings(): UserSettings {
-        return { ...this.settings };
-    }
-
-    public updateSettings(updates: Partial<UserSettings>): UserSettings {
-        this.settings = { ...this.settings, ...updates };
-        this.persist();
-        return this.settings;
+        return newSettings;
     }
 }
 

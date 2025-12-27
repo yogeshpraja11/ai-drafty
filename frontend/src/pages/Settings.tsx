@@ -60,8 +60,18 @@ export default function Settings() {
             </Button>
           </Link>
           <div className="flex items-center gap-2">
-            <Bot className="h-6 w-6 text-[hsl(var(--draftly-ai))]" />
             <h1 className="text-xl font-semibold">Settings</h1>
+          </div>
+          <div className="ml-auto">
+            <Button
+              variant="outline"
+              onClick={() => {
+                localStorage.removeItem("user");
+                window.location.href = "/login";
+              }}
+            >
+              Sign Out
+            </Button>
           </div>
         </div>
       </header>
