@@ -14,11 +14,12 @@ export class AIResponseHandler {
 
   async generateResponse(email: Email, tone: DraftTone = 'formal'): Promise<string> {
     // Fetch dependencies
-    const settings = settingsStore.getSettings();
+    const userId = email.userId; // Assuming email has userId
+    const settings = await settingsStore.getSettings(userId);
     const signature = settings.signature || '';
 
     // Fetch recent sent emails for style analysis
-    const sentEmails = await this.emailService.fetchLastSentEmails(5);
+    const sentEmails = await this.emailService.fetchLastSentEmails(userId, 5);
 
     const prompt = this.createPrompt(email, tone, signature, sentEmails);
     return this.groqService.generateEmailResponse(prompt);

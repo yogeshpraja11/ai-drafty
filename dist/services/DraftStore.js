@@ -1,53 +1,37 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DraftStore = void 0;
-const fs_1 = __importDefault(require("fs"));
-const path_1 = __importDefault(require("path"));
+const database_1 = require("../db/database");
 const logger_1 = require("../utils/logger");
-const DATA_FILE = path_1.default.join(process.cwd(), 'data', 'drafts.json');
 class DraftStore {
-    state = { drafts: [] };
-    constructor() {
-        this.load();
-    }
-    load() {
-        try {
-            if (fs_1.default.existsSync(DATA_FILE)) {
-                const raw = fs_1.default.readFileSync(DATA_FILE, 'utf8');
-                this.state = JSON.parse(raw);
-            }
-            else {
-                this.persist();
-            }
-        }
-        catch (err) {
-            logger_1.logger.error('Failed to load draft store, starting fresh', err);
-            this.state = { drafts: [] };
-        }
-    }
-    persist() {
-        try {
-            const dir = path_1.default.dirname(DATA_FILE);
-            if (!fs_1.default.existsSync(dir)) {
-                fs_1.default.mkdirSync(dir, { recursive: true });
-            }
-            fs_1.default.writeFileSync(DATA_FILE, JSON.stringify(this.state, null, 2), 'utf8');
-        }
-        catch (err) {
-            logger_1.logger.error('Failed to persist draft store', err);
-        }
-    }
     now() {
         return new Date().toISOString();
     }
-    addHistory(draft, action, details) {
-        draft.history.push({ at: this.now(), action, details });
+    // Helper to map DB row to DraftRecord
+    parseRow(row) {
+        return {
+            id: row.id,
+            email: JSON.parse(row.email_data),
+            draftText: row.draft_text,
+            tone: row.tone,
+            status: row.status,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+            history: JSON.parse(row.history || '[]')
+        };
     }
-    addIncomingEmail(email, draftText, tone = 'formal') {
+    async addIncomingEmail(userId, email, draftText, tone = 'formal') {
+        const db = await (0, database_1.getDb)();
+        const existing = await db.get('SELECT id FROM drafts WHERE id = ?', email.id);
+        if (existing) {
+            logger_1.logger.info(`Draft already exists for email ${email.id}`);
+            return null;
+        }
         const now = this.now();
+        const history = [
+            { at: now, action: 'email_received', details: { from: email.from, subject: email.subject } },
+            { at: now, action: 'draft_generated', details: { tone } }
+        ];
         const record = {
             id: email.id,
             email,
@@ -56,45 +40,50 @@ class DraftStore {
             status: 'draft_generated',
             createdAt: now,
             updatedAt: now,
-            history: [],
+            history
         };
-        this.addHistory(record, 'email_received', { from: email.from, subject: email.subject });
-        this.addHistory(record, 'draft_generated', { tone });
-        this.state.drafts.unshift(record);
-        this.persist();
+        await db.run(`INSERT INTO drafts (id, user_id, email_data, draft_text, status, tone, history, created_at, updated_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, email.id, userId, JSON.stringify(email), draftText, 'draft_generated', tone, JSON.stringify(history), now, now);
+        logger_1.logger.info(`Created draft for email ${email.id}`);
         return record;
     }
-    listDrafts(status) {
-        if (!status)
-            return this.state.drafts;
-        return this.state.drafts.filter((d) => d.status === status);
-    }
-    getDraft(id) {
-        return this.state.drafts.find((d) => d.id === id);
-    }
-    updateDraftText(id, draftText, tone) {
-        const draft = this.getDraft(id);
-        if (!draft)
-            return undefined;
-        draft.draftText = draftText;
-        if (tone) {
-            draft.tone = tone;
+    async listDrafts(userId, status) {
+        const db = await (0, database_1.getDb)();
+        let rows;
+        if (status) {
+            rows = await db.all('SELECT * FROM drafts WHERE user_id = ? AND status = ? ORDER BY created_at DESC', userId, status);
         }
-        draft.status = draft.status === 'draft_generated' ? 'draft_edited' : draft.status;
-        draft.updatedAt = this.now();
-        this.addHistory(draft, 'draft_updated', { tone: draft.tone });
-        this.persist();
-        return draft;
+        else {
+            rows = await db.all('SELECT * FROM drafts WHERE user_id = ? ORDER BY created_at DESC', userId);
+        }
+        return rows.map(this.parseRow);
     }
-    updateStatus(id, status, details) {
-        const draft = this.getDraft(id);
+    async getDraft(id) {
+        const db = await (0, database_1.getDb)();
+        const row = await db.get('SELECT * FROM drafts WHERE id = ?', id);
+        if (!row)
+            return undefined;
+        return this.parseRow(row);
+    }
+    async updateDraftText(id, draftText, tone) {
+        const db = await (0, database_1.getDb)();
+        const draft = await this.getDraft(id);
         if (!draft)
             return undefined;
-        draft.status = status;
-        draft.updatedAt = this.now();
-        this.addHistory(draft, `status_${status}`, details);
-        this.persist();
-        return draft;
+        const history = draft.history;
+        history.push({ at: this.now(), action: 'draft_updated', details: { tone: tone || draft.tone } });
+        await db.run(`UPDATE drafts SET draft_text = ?, tone = ?, status = ?, history = ?, updated_at = ? WHERE id = ?`, draftText, tone || draft.tone, draft.status === 'draft_generated' ? 'draft_edited' : draft.status, JSON.stringify(history), this.now(), id);
+        return this.getDraft(id);
+    }
+    async updateStatus(id, status, details) {
+        const db = await (0, database_1.getDb)();
+        const draft = await this.getDraft(id);
+        if (!draft)
+            return undefined;
+        const history = draft.history;
+        history.push({ at: this.now(), action: `status_${status}`, details });
+        await db.run(`UPDATE drafts SET status = ?, history = ?, updated_at = ? WHERE id = ?`, status, JSON.stringify(history), this.now(), id);
+        return this.getDraft(id);
     }
 }
 exports.DraftStore = DraftStore;

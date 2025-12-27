@@ -8,13 +8,13 @@ const DraftStore_1 = require("../services/DraftStore");
 class EmailHandler {
     emailService;
     spamHandler;
-    aiHandler;
     draftStore;
-    constructor(emailService, spamHandler = new SpamHandler_1.SpamHandler(), aiHandler = new AIResponseHandler_1.AIResponseHandler(), draftStore = new DraftStore_1.DraftStore()) {
+    aiHandler;
+    constructor(emailService, spamHandler = new SpamHandler_1.SpamHandler(), aiHandler, draftStore = new DraftStore_1.DraftStore()) {
         this.emailService = emailService;
         this.spamHandler = spamHandler;
-        this.aiHandler = aiHandler;
         this.draftStore = draftStore;
+        this.aiHandler = aiHandler || new AIResponseHandler_1.AIResponseHandler(emailService);
         this.registerListeners();
     }
     registerListeners() {
@@ -25,10 +25,21 @@ class EmailHandler {
                     logger_1.logger.info(`Marked email as spam from ${email.from}`);
                     return;
                 }
-                // Generate an AI draft and store it for review instead of sending immediately
-                const response = await this.aiHandler.generateResponse(email, 'formal');
-                this.draftStore.addIncomingEmail(email, response, 'formal');
-                logger_1.logger.info(`Draft generated for email from ${email.from}`);
+                // Store the email as pending, without generating a draft yet
+                // We pass empty string as draftText and 'pending' as status (though addIncomingEmail might default to 'draft_generated', we need to check DraftStore or just pass what we can)
+                // Trying to use addIncomingEmail with empty text.
+                // Assuming email.userId is present as per new Email type
+                const draft = await this.draftStore.addIncomingEmail(email.userId, email, '', 'formal'); // Empty draft text
+                if (draft) {
+                    // We need to manually set status to pending if addIncomingEmail doesn't support it, 
+                    // OR we assume empty text implies pending.
+                    // Let's look at DraftStore.ts again. It sets status to 'draft_generated' by default.
+                    await this.draftStore.updateStatus(draft.id, 'pending');
+                    logger_1.logger.info(`Saved email from ${email.from} as pending (Subject: ${email.subject})`);
+                }
+                else {
+                    logger_1.logger.info(`Skipped creating draft - already exists for email from ${email.from}`);
+                }
             }
             catch (error) {
                 logger_1.logger.error('Error processing email:', error);

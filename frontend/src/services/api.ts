@@ -4,7 +4,30 @@ const getBaseUrl = (): string => {
   return localStorage.getItem('draftly_api_url') || 'http://localhost:3000';
 };
 
+const getHeaders = (): HeadersInit => {
+  const userStr = localStorage.getItem('user');
+  const headers: HeadersInit = {
+    'Content-Type': 'application/json',
+  };
+  if (userStr) {
+    try {
+      const user = JSON.parse(userStr);
+      if (user.id) {
+        headers['x-user-id'] = user.id;
+      }
+    } catch {
+      // ignore invalid user json
+    }
+  }
+  return headers;
+};
+
 const handleResponse = async <T>(response: Response): Promise<T> => {
+  if (response.status === 401) {
+    // Redirect to login if unauthorized
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
   if (!response.ok) {
     const error = await response.json().catch(() => ({ message: 'An error occurred' }));
     throw new Error(error.message || `HTTP error ${response.status}`);
@@ -19,13 +42,17 @@ export const api = {
     if (status) {
       url.searchParams.set('status', status);
     }
-    const response = await fetch(url.toString());
+    const response = await fetch(url.toString(), {
+      headers: getHeaders()
+    });
     return handleResponse<Draft[]>(response);
   },
 
   // Get a single draft by ID
   getDraft: async (id: string): Promise<Draft> => {
-    const response = await fetch(`${getBaseUrl()}/api/drafts/${id}`);
+    const response = await fetch(`${getBaseUrl()}/api/drafts/${id}`, {
+      headers: getHeaders()
+    });
     return handleResponse<Draft>(response);
   },
 
@@ -33,7 +60,7 @@ export const api = {
   generateDraft: async (id: string, tone: ToneType): Promise<Draft> => {
     const response = await fetch(`${getBaseUrl()}/api/drafts/${id}/generate`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ tone }),
     });
     return handleResponse<Draft>(response);
@@ -43,7 +70,7 @@ export const api = {
   editDraft: async (id: string, text: string, tone: ToneType): Promise<Draft> => {
     const response = await fetch(`${getBaseUrl()}/api/drafts/${id}/edit`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ text, tone }),
     });
     return handleResponse<Draft>(response);
@@ -53,7 +80,7 @@ export const api = {
   approveDraft: async (id: string, draftText?: string): Promise<Draft> => {
     const response = await fetch(`${getBaseUrl()}/api/drafts/${id}/approve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getHeaders(),
       body: JSON.stringify({ draftText }),
     });
     return handleResponse<Draft>(response);
@@ -63,6 +90,7 @@ export const api = {
   rejectDraft: async (id: string): Promise<Draft> => {
     const response = await fetch(`${getBaseUrl()}/api/drafts/${id}/reject`, {
       method: 'POST',
+      headers: getHeaders()
     });
     return handleResponse<Draft>(response);
   },
@@ -72,6 +100,7 @@ export const api = {
     try {
       const response = await fetch(`${getBaseUrl()}/api/drafts`, {
         method: 'GET',
+        headers: getHeaders(),
         signal: AbortSignal.timeout(5000),
       });
       return response.ok;

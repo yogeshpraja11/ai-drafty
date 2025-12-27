@@ -1,266 +1,173 @@
 import { EventEmitter } from 'events';
-import nodemailer from 'nodemailer';
-import Imap from 'imap';
+import { google } from 'googleapis';
 import { simpleParser } from 'mailparser';
 import { Email } from '../types/email';
 import { logger } from '../utils/logger';
 import { config } from '../config';
+import { userService } from './UserService';
+import { googleAuthService } from './GoogleAuthService';
+import { User } from './UserService';
 
 export class EmailService extends EventEmitter {
-  private transporter: nodemailer.Transporter;
   private startTime: Date;
 
   constructor() {
     super();
     this.startTime = new Date();
-    this.transporter = this.createTransporter();
     this.setupPolling();
-  }
-
-  private createTransporter(): nodemailer.Transporter {
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: config.email.user,
-        pass: config.email.password
-      }
-    });
   }
 
   private setupPolling(): void {
     setInterval(async () => {
       try {
-        const emails = await this.fetchEmails();
-        emails.forEach(email => this.emit('email:received', email));
+        const users = await userService.getAllUsers();
+        for (const user of users as User[]) {
+          await this.processUserEmails(user);
+        }
       } catch (error) {
         logger.error('Email polling failed:', error);
       }
     }, config.email.pollInterval);
   }
 
-  public async fetchEmails(): Promise<Email[]> {
-    return new Promise((resolve, reject) => {
-      const imap = new Imap({
-        user: config.email.user,
-        password: config.email.password,
-        host: 'imap.gmail.com',
-        port: 993,
-        tls: true,
-        tlsOptions: {
-          rejectUnauthorized: false,
-          servername: 'imap.gmail.com'
-        },
-        authTimeout: 10000
+  private async processUserEmails(user: User) {
+    if (!user.access_token || !user.refresh_token) return;
+
+    try {
+      const auth = googleAuthService.createClient(user.access_token, user.refresh_token);
+      const gmail = google.gmail({ version: 'v1', auth });
+
+      // List unread messages
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        q: 'is:unread',
+        maxResults: 10 // Limit to avoid overwhelming
       });
 
-      const emails: Email[] = [];
+      const messages = response.data.messages || [];
 
-      imap.once('ready', () => {
-        imap.openBox('INBOX', false, (err, box) => {
-          if (err) {
-            logger.error('Failed to open INBOX:', err);
-            return reject(err);
-          }
+      for (const msg of messages) {
+        if (!msg.id) continue;
 
-          const totalMessages = box.messages.total;
-          if (totalMessages === 0) {
-            logger.info('Inbox is empty');
-            imap.end();
-            return resolve([]);
-          }
-
-          // Fetch the last 30 messages (or fewer if total < 30)
-          const fetchCount = 30;
-          const startSeq = Math.max(1, totalMessages - fetchCount + 1);
-          const endSeq = totalMessages;
-
-          logger.info(`Fetching emails ${startSeq}:${endSeq} (total: ${totalMessages})`);
-
-          const fetch = imap.seq.fetch(`${startSeq}:${endSeq}`, {
-            bodies: ['HEADER.FIELDS (FROM TO SUBJECT DATE)', 'TEXT'],
-            markSeen: false, // Don't mark as seen when just browsing history
-            modifiers: { uid: true }
-          });
-
-          fetch.on('message', (msg) => {
-            let headers: any = {};
-            let text = '';
-            const uid = (msg as any).uid;
-
-            msg.on('body', (stream, info) => {
-              let buffer = '';
-              stream.on('data', (chunk) => buffer += chunk.toString('utf8'));
-              stream.on('end', () => {
-                if (info.which === 'HEADER.FIELDS (FROM TO SUBJECT DATE)') {
-                  headers = Imap.parseHeader(buffer);
-                } else {
-                  text = buffer;
-                }
-              });
-            });
-
-            msg.once('end', async () => {
-              try {
-                const parsed = await simpleParser(text);
-
-                const emailData = {
-                  id: uid?.toString() || Date.now().toString(),
-                  from: headers.from?.[0] || 'unknown@example.com',
-                  to: headers.to?.[0] || config.email.user,
-                  subject: headers.subject?.[0] || 'No Subject',
-                  text: parsed.text || '',
-                  date: headers.date?.[0] ? new Date(headers.date[0]) : new Date()
-                };
-
-                if (!emailData.from || !emailData.text) {
-                  // Relaxed validation: sometimes text is empty but has attachments/html, 
-                  // but we'll stick to basic check for now, just logging warning instead of strict skip maybe?
-                  // For now keeping existing strict check but logging less noisy if just empty text
-                }
-
-                if (emailData.from) { // Ensure at least sender exists
-                  // Reverse order is usually handled by frontend, but we are pushing in seq order (oldest to newest)
-                  // We'll reverse at the end or let frontend handle it.
-                  // Pushing to array
-                  emails.push(emailData);
-                }
-
-              } catch (error) {
-                logger.error('Error parsing email:', error);
-              }
-            });
-          });
-
-          fetch.once('error', (err) => reject(err));
-          fetch.once('end', () => {
-            imap.end();
-            // emails come in specific order (usually ascending seq), let's ensure they are consistent
-            // The user requested "recent mails", so usually newest first is better for UI, 
-            // but the Service just returns a list. Frontend usually sorts. 
-            // However, `imap.seq.fetch` usually returns in order. 
-            resolve(emails.reverse()); // Reverse to have newest first in the returned array
-          });
+        // Fetch full message
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'raw' // simpler to use simpleParser on raw
         });
-      });
 
-      imap.once('error', (err: any) => reject(err));
-      imap.connect();
-    });
-  }
+        if (!fullMsg.data.raw) continue;
 
-  public async fetchLastSentEmails(limit: number = 5): Promise<string[]> {
-    return new Promise((resolve, reject) => {
-      const imap = new Imap({
-        user: config.email.user,
-        password: config.email.password,
-        host: 'imap.gmail.com',
-        port: 993,
-        tls: true,
-        tlsOptions: {
-          rejectUnauthorized: false,
-          servername: 'imap.gmail.com'
-        },
-        authTimeout: 10000
-      });
+        // Decode raw message (base64url)
+        const decodedRaw = Buffer.from(fullMsg.data.raw, 'base64').toString();
+        const parsed = await simpleParser(decodedRaw);
 
-      const sentEmails: string[] = [];
+        // Check if we should process (e.g. date)
+        // If we want to avoid re-processing, we might need to check if draft/processed exists in DB.
+        // But for now, relying on 'is:unread' and maybe marking as read (or not).
+        // The requirements say "fetch unread", usually implies we shouldn't re-process old ones.
+        // We can check if date > startTime to simulate "new sessions only" 
+        // OR check if we already have it. 
+        // For robustness, let's just emit. The listener (DraftStore) checks existence.
 
-      imap.once('ready', () => {
-        // [Gmail]/Sent Mail is the standard Sent folder name for Gmail via IMAP
-        imap.openBox('[Gmail]/Sent Mail', true, (err, box) => {
-          if (err) {
-            // Fallback to "Sent" if specific Gmail folder fails (though unlikely for Gmail)
-            imap.openBox('Sent', true, (err2, box2) => {
-              if (err2) {
-                logger.error('Failed to open Sent mailbox:', err2);
-                imap.end();
-                return resolve([]);
-              }
-              this.fetchFromBox(imap, box2, limit, resolve);
-            });
-            return;
-          }
-          this.fetchFromBox(imap, box, limit, resolve);
-        });
-      });
+        const email: Email = {
+          id: msg.id,
+          userId: user.id,
+          from: parsed.from?.text || 'unknown',
+          to: Array.isArray(parsed.to) ? parsed.to.map(t => t.text).join(', ') : (parsed.to?.text || 'me'),
+          subject: parsed.subject || 'No Subject',
+          text: parsed.text || '',
+          date: parsed.date || new Date()
+        };
 
-      imap.once('error', (err: any) => {
-        logger.error('IMAP Error fetching sent emails:', err);
-        resolve([]); // Return empty on error to not block AI generation
-      });
-
-      imap.connect();
-    });
-  }
-
-  private fetchFromBox(imap: Imap, box: Imap.Box, limit: number, resolve: (val: string[]) => void) {
-    const totalMessages = box.messages.total;
-    if (totalMessages === 0) {
-      imap.end();
-      return resolve([]);
-    }
-
-    const fetchCount = Math.min(limit, totalMessages);
-    const startSeq = Math.max(1, totalMessages - fetchCount + 1);
-    const endSeq = totalMessages;
-
-    const fetch = imap.seq.fetch(`${startSeq}:${endSeq}`, {
-      bodies: ['TEXT'],
-      markSeen: false,
-    });
-
-    const bodies: string[] = [];
-    let pending = 0;
-
-    fetch.on('message', (msg) => {
-      pending++;
-      msg.on('body', (stream, info) => {
-        let buffer = '';
-        stream.on('data', (chunk) => buffer += chunk.toString('utf8'));
-        stream.on('end', async () => {
-          try {
-            // simpleParser is versatile, usually handles raw email text well
-            // But for bodies: ['TEXT'], we might get just the body part or partial structure
-            // Let's try simpleParser on the buffer
-            const parsed = await simpleParser(buffer);
-            if (parsed.text) {
-              // Basic cleaning: Remove quoted replies usually noted by ">" or "On ... wrote:"
-              // This is a naive regex but helps cleaning up context
-              const cleanText = parsed.text.split(/On .* wrote:|From: /i)[0].trim();
-              if (cleanText) bodies.push(cleanText);
-            }
-          } catch (e) {
-            // ignore parse error
-          } finally {
-            pending--;
-            if (pending === 0 && ended) {
-              imap.end();
-              resolve(bodies);
-            }
-          }
-        });
-      });
-    });
-
-    let ended = false;
-    fetch.once('end', () => {
-      ended = true;
-      if (pending === 0) {
-        imap.end();
-        resolve(bodies);
+        this.emit('email:received', email);
       }
-    });
+
+    } catch (error) {
+      logger.error(`Error processing emails for user ${user.id}:`, error);
+    }
+  }
+
+  public async fetchLastSentEmails(userId: string, limit: number = 5): Promise<string[]> {
+    const user = await userService.getUser(userId) as User;
+    if (!user || !user.access_token || !user.refresh_token) return [];
+
+    try {
+      const auth = googleAuthService.createClient(user.access_token, user.refresh_token);
+      const gmail = google.gmail({ version: 'v1', auth });
+
+      const response = await gmail.users.messages.list({
+        userId: 'me',
+        labelIds: ['SENT'],
+        maxResults: limit
+      });
+
+      const messages = response.data.messages || [];
+      const bodies: string[] = [];
+
+      for (const msg of messages) {
+        if (!msg.id) continue;
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id,
+          format: 'raw'
+        });
+
+        if (fullMsg.data.raw) {
+          const decodedRaw = Buffer.from(fullMsg.data.raw, 'base64').toString();
+          const parsed = await simpleParser(decodedRaw);
+          // Clean text
+          if (parsed.text) {
+            const cleanText = parsed.text.split(/On .* wrote:|From: /i)[0].trim();
+            if (cleanText) bodies.push(cleanText);
+          }
+        }
+      }
+      return bodies;
+    } catch (error) {
+      logger.error(`Error fetching sent emails for user ${userId}`, error);
+      return [];
+    }
   }
 
   public async sendReply(originalEmail: Email, response: string): Promise<void> {
+    const userId = originalEmail.userId;
+    const user = await userService.getUser(userId) as User;
+    if (!user || !user.access_token || !user.refresh_token) {
+      throw new Error('User authentication missing');
+    }
+
     try {
-      await this.transporter.sendMail({
-        from: config.email.user,
-        to: originalEmail.from,
-        subject: `Re: ${originalEmail.subject}`,
-        text: response
+      const auth = googleAuthService.createClient(user.access_token, user.refresh_token);
+      const gmail = google.gmail({ version: 'v1', auth });
+
+      // Create raw email
+      const subject = originalEmail.subject.startsWith('Re:') ? originalEmail.subject : `Re: ${originalEmail.subject}`;
+
+      const messageParts = [
+        `From: "Me" <${user.email}>`,
+        `To: ${originalEmail.from}`,
+        `Subject: ${subject}`,
+        `In-Reply-To: ${originalEmail.id}`,
+        `References: ${originalEmail.id}`,
+        `Content-Type: text/plain; charset=utf-8`,
+        `MIME-Version: 1.0`,
+        ``,
+        response
+      ];
+
+      const rawMessage = messageParts.join('\n');
+      const encodedMessage = Buffer.from(rawMessage).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+      await gmail.users.messages.send({
+        userId: 'me',
+        requestBody: {
+          raw: encodedMessage,
+          threadId: originalEmail.id // Threading
+        }
       });
-      logger.info(`Replied to email from ${originalEmail.from}`);
+
+      logger.info(`Replied to email ${originalEmail.id} for user ${userId}`);
     } catch (error) {
       logger.error('Failed to send reply:', error);
       throw error;
